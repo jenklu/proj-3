@@ -5,7 +5,10 @@
 #include "GameConstants.h"
 #include <string>
 
+
 // Students:  Add code to this file, StudentWorld.cpp, Actor.h, and Actor.cpp
+class FrackMan;
+class Dirt;
 
 class StudentWorld : public GameWorld
 {
@@ -14,25 +17,26 @@ public:
 	 : GameWorld(assetDir)
 	{
 	}
+    
+    ~StudentWorld();
+    
+    virtual int init();
 
-	virtual int init()
-	{
-		return GWSTATUS_CONTINUE_GAME;
-	}
+    virtual int move();
 
-	virtual int move()
-	{
-		  // This code is here merely to allow the game to build, run, and terminate after you hit enter a few times.
-		  // Notice that the return value GWSTATUS_PLAYER_DIED will cause our framework to end the current level.
-		decLives();
-		return GWSTATUS_PLAYER_DIED;
-	}
-
-	virtual void cleanUp()
-	{
-	}
-
+    virtual void cleanUp();
+    
+    bool eraseDirt(int startX, int startY, int endX, int endY);
+    
+    inline bool isDirtAt(int x, int y) { return dirtArr[x][y] != nullptr; }
+    
+    void setDisplayText();
+    
+    void killPlayer();
 private:
+    inline void addFrontChar(char c, std::string& s, int desLength);
+    FrackMan* player;
+    Dirt* dirtArr[VIEW_WIDTH][VIEW_HEIGHT];
 };
 
 #endif // STUDENTWORLD_H_
