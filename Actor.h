@@ -2,8 +2,9 @@
 #define ACTOR_H_
 
 #include "GraphObject.h"
-#include <vector>
+#include <queue>
 class StudentWorld;
+
 const int BSTATE_STABLE = 0;
 const int BSTATE_WAITING = 1;
 const int BSTATE_FALLING = 2;
@@ -13,6 +14,10 @@ const int GOODIE_TEMP = 2;
 const int FMAN_GOODIE = 3;
 const int PTESTOR_GOODIE = 4;
 
+enum actorType {
+    boulder, protester, other
+};
+
 /////////////////////////////////////////////////////////////////////////
 class Actor : public GraphObject{
  public:
@@ -20,9 +25,9 @@ class Actor : public GraphObject{
     
     ~Actor() {}
     
-    virtual int doSomething();
+    virtual void doSomething();
     
-    virtual int uniqueDoSomething() = 0;
+    virtual void uniqueDoSomething() = 0;
     
     inline bool isAlive() const { return m_alive; }
     
@@ -34,26 +39,32 @@ class Actor : public GraphObject{
     
     double distance(int x, int y) const;
     
+    inline actorType getType() const { return m_type; }
+    
+    void giveNextLocInDir(Direction d, int& x, int& y);
  private:
     StudentWorld* m_currWorld;
     bool m_alive;
+    actorType m_type;
 };
 
 /////////////////////////////////////////////////////////////////////////
 class Person : public Actor{
  public:
-    Person(int imageID, int startX, int startY,  Direction dir, StudentWorld* currWorld, int hitPoints, double size = 1.0, unsigned int depth = 0);
+    Person(int imageID, int startX, int startY,  Direction dir, StudentWorld* currWorld, int hitPoints, int giveUpSound, double size = 1.0, unsigned int depth = 0);
     
     ~Person() {}
     
     void getAnnoyed(int toSub);
     
-    virtual void playGiveUpSound() const = 0;
+    virtual void hpRanOut() = 0;
     
     inline int getHP() const { return m_hitPoints; }
     
+    virtual void wasAnnoyed();
+    
  private:
-    int m_hitPoints;
+    int m_hitPoints, m_giveUpSound;
 };
 
 /////////////////////////////////////////////////////////////////////////
@@ -63,14 +74,15 @@ class Goodie : public Actor{
     
     ~Goodie() {}
     
-    int uniqueDoSomething();
+    void uniqueDoSomething();
     
     virtual void getFound() = 0;
     
-    virtual int goodieDoSomething();
+    inline int forWhom() { return m_forWhom; }
     
+    virtual void goodieDoSomething() { return; }
  private:
-    int m_permanence, m_forwhom, m_pointValue, m_soundID, m_ticksLeft;
+    int m_permanence, m_forWhom, m_pointValue, m_soundID, m_ticksLeft;
 };
 
 /////////////////////////////////////////////////////////////////////////
@@ -80,7 +92,7 @@ class FrackMan : public Person{
     
     ~FrackMan() {}
     
-    int uniqueDoSomething();
+    void uniqueDoSomething();
     
     inline void addFiveSquirts() { m_squirts += 5; }
     
@@ -94,20 +106,11 @@ class FrackMan : public Person{
     
     inline int getNuggets() const { return m_nuggets; }
     
-    void playGiveUpSound() const;
-    
-    void addBoulderLoc(int x, int y);
-    
-    bool canMoveTo(int x, int y);
+    void hpRanOut();
     
  private:
     Actor* createSquirt();
     int m_squirts, m_sonar, m_nuggets;
-    struct Coord{
-        int x, y;
-    };
-    std::vector<Coord> boulderLocs;
-    
 };
 
 /////////////////////////////////////////////////////////////////////////
@@ -128,7 +131,7 @@ class Boulder : public Actor{
     
     ~Boulder() {}
     
-    int uniqueDoSomething();
+    void uniqueDoSomething();
     
  private:
     bool isDirtBelow();
@@ -144,7 +147,7 @@ class Squirt : public Actor{
     
     ~Squirt() {}
     
-    int uniqueDoSomething();
+    void uniqueDoSomething();
     
  private:
     int m_squaresLeft;
@@ -155,11 +158,9 @@ class Barrel : public Goodie{
  public:
     Barrel(int startX, int startY, StudentWorld* currWorld);
     
-    ~Barrel() {}
+    ~Barrel();
     
     void getFound();
-    
-    int goodieDoSomething();
  
 };
 
@@ -172,8 +173,7 @@ class Nugget : public Goodie{
     
     void getFound();
     
-    int goodieDoSomething();
-    
+    virtual void goodieDoSomething();
 };
 
 /////////////////////////////////////////////////////////////////////////
@@ -197,25 +197,44 @@ class WaterPool : public Goodie{
 };
 
 /////////////////////////////////////////////////////////////////////////
-class Protestor : public Person{
+class Protester : public Person{
  public:
-    Protestor(int startX, int startY, StudentWorld* currWorld, int hitPoints = 5, int imageID = IID_PROTESTER);
+    Protester(int startX, int startY, StudentWorld* currWorld, int hitPoints = 5, int imageID = IID_PROTESTER);
     
-    int uniqueDoSomething();
+    void uniqueDoSomething();
     
-    virtual int hardCoreDoSomething();
+    virtual void hardCoreDoSomething();
     
-    void playGiveUpSound() const;
+    virtual void findGold();
+    
+    virtual void hpRanOut();
+    
+    virtual void wasAnnoyed();
+    
+    inline bool canBeAnnoyed() { return !m_leaveScreenState; }
+    
+ protected:
+    void getStunned();
     
  private:
-    bool m_leaveScreenState, m_restState;
+    bool canShoutAtFrackMan();
+    
+    bool m_leaveScreenState;
     int m_stepsToKeepGoing;
-    int m_ticksWaited;
+    int m_ticksToRest, m_ticksRested, m_ticksSinceYell;
+    
 };
 
 /////////////////////////////////////////////////////////////////////////
-class HardCoreProtestor : public Protestor{
+class HardCoreProtester : public Protester{
  public:
-   // HardCoreProtestor
-    HardCoreProtestor(int startX, int startY, StudentWorld* currworld);
+   // HardCoreProtester
+    HardCoreProtester(int startX, int startY, StudentWorld* currworld);
+    
+    virtual void hardCoreDoSomething();
+    
+    virtual void findGold();
+    
+    virtual void hpRanOut();
+    
 };
