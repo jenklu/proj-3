@@ -14,18 +14,26 @@ const int GOODIE_TEMP = 2;
 const int FMAN_GOODIE = 3;
 const int PTESTOR_GOODIE = 4;
 
+const bool MOVETO_EXIT = true;
+const bool MOVETO_PLAYER = false;
+
 enum actorType {
-    boulder, protester, other
+    boulder, protester, squirt, other
 };
 
+void giveNextLocInDir(GraphObject::Direction d, int& x, int& y); //Declared outside of Actor so it can also be used by StudentWorld, because it actually has nothing to do with member variables
 /////////////////////////////////////////////////////////////////////////
 class Actor : public GraphObject{
  public:
     Actor(int imageID, int startX, int startY, Direction dir, StudentWorld* currWorld, double size = 1.0, unsigned int depth = 0);
     
-    ~Actor() {}
+    virtual ~Actor() {}
     
-    virtual void doSomething();
+    void doSomething();
+    
+    double distance(Actor* check) const;
+    
+    double distance(int x, int y) const;
     
     virtual void uniqueDoSomething() = 0;
     
@@ -35,13 +43,8 @@ class Actor : public GraphObject{
     
     inline StudentWorld* getWorld() const { return m_currWorld; }
     
-    double distance(Actor* check) const;
-    
-    double distance(int x, int y) const;
-    
     inline actorType getType() const { return m_type; }
     
-    void giveNextLocInDir(Direction d, int& x, int& y);
  private:
     StudentWorld* m_currWorld;
     bool m_alive;
@@ -53,15 +56,15 @@ class Person : public Actor{
  public:
     Person(int imageID, int startX, int startY,  Direction dir, StudentWorld* currWorld, int hitPoints, int giveUpSound, double size = 1.0, unsigned int depth = 0);
     
-    ~Person() {}
+    virtual ~Person() {}
     
-    void getAnnoyed(int toSub);
+    void getAnnoyed(int toSub, actorType annoyer = other);
     
-    virtual void hpRanOut() = 0;
+    virtual void hpRanOut(actorType annoyer) = 0;
     
     inline int getHP() const { return m_hitPoints; }
     
-    virtual void wasAnnoyed();
+    inline virtual void wasAnnoyed() {}
     
  private:
     int m_hitPoints, m_giveUpSound;
@@ -72,7 +75,7 @@ class Goodie : public Actor{
  public:
     Goodie(int imageID, int startX, int startY, StudentWorld* currWorld, bool isVisible, int permanence, int pointValue, int soundID = SOUND_GOT_GOODIE, int forwho = FMAN_GOODIE);
     
-    ~Goodie() {}
+    virtual ~Goodie() {}
     
     void uniqueDoSomething();
     
@@ -106,7 +109,7 @@ class FrackMan : public Person{
     
     inline int getNuggets() const { return m_nuggets; }
     
-    void hpRanOut();
+    inline void hpRanOut(actorType annoyer) { setDead(); }
     
  private:
     Actor* createSquirt();
@@ -199,15 +202,14 @@ class WaterPool : public Goodie{
 /////////////////////////////////////////////////////////////////////////
 class Protester : public Person{
  public:
-    Protester(int startX, int startY, StudentWorld* currWorld, int hitPoints = 5, int imageID = IID_PROTESTER);
+    Protester(int startX, int startY, StudentWorld* currWorld, int hitPoints = 5, int imageID = IID_PROTESTER, bool isHardCore = false);
+    ~Protester() {}
     
     void uniqueDoSomething();
     
-    virtual void hardCoreDoSomething();
-    
     virtual void findGold();
     
-    virtual void hpRanOut();
+    void hpRanOut(actorType annoyer);
     
     virtual void wasAnnoyed();
     
@@ -216,12 +218,16 @@ class Protester : public Person{
  protected:
     void getStunned();
     
+    inline virtual bool hardCoreDoSomething() { return false; }
+    
  private:
     bool canShoutAtFrackMan();
     
-    bool m_leaveScreenState;
+    bool canMovePerpInD(Direction& d);
+    
+    bool m_leaveScreenState, m_isHardCore;
     int m_stepsToKeepGoing;
-    int m_ticksToRest, m_ticksRested, m_ticksSinceYell;
+    int m_ticksToRest, m_ticksRested, m_ticksSinceYell, m_ticksSincePerp;
     
 };
 
@@ -231,10 +237,11 @@ class HardCoreProtester : public Protester{
    // HardCoreProtester
     HardCoreProtester(int startX, int startY, StudentWorld* currworld);
     
-    virtual void hardCoreDoSomething();
+    virtual bool hardCoreDoSomething();
     
     virtual void findGold();
     
-    virtual void hpRanOut();
+ private:
+    int m_cellPhoneRad;
     
 };
