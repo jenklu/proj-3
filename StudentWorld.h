@@ -12,8 +12,10 @@ class Actor;
 class Protester;
 class FrackMan;
 class Dirt;
+class GraphObject;
 enum moveStatus{ edgeBlocked, boulderBlocked, canMove };
-enum oneOrAll{ one, all };
+enum distanceFromWhere { topright, player};
+
 class StudentWorld : public GameWorld
 {
 public:
@@ -32,6 +34,27 @@ public:
     
     bool eraseDirt(int startX, int startY, int endX, int endY);
     
+    bool isDirtOverlap(int x, int y) const;
+    
+    moveStatus canMoveTo(int x, int y);
+    
+    void setRadiusVisible(double x, double y, double rad);
+    
+    //If there are no protesters within the radius of x&y, does nothing & returns nullptr.  Annoyer is passed as a pointer so that it's type can be deduced within the implementation of the function and passed to the getAnnoyed function. This is necessary because certain cases of being annoyed for protesters require knowing what is annoying the protester
+    bool annoyProtestersNear(Actor* annoyer, int pointsToAnnoy, double x, double y, double rad = 3.0);
+    
+    Protester* findProtesterNear(double x, double y);
+    
+    int numStepsFromPlayer(int x, int y);
+    
+    bool faceFrackMan(Actor* setFacing);
+    
+    void moveCloserTo(bool movingToExit, Actor* looking);
+    
+    inline void makeUpdateDistFromPlayer() { m_shouldUpdateDistPlayer = true; }
+    
+    inline void makeUpdateDistFromExit() { m_shouldUpdateDistExit = true; }
+
     inline bool isDirtAt(int x, int y) { return m_dirtArr[x][y] != nullptr; }
     
     inline FrackMan* getPlayer() { return m_player; }
@@ -42,21 +65,12 @@ public:
     
     inline void addToWorld(Actor* newActor) { m_actors.push_back(newActor); }
     
-    bool isDirtOverlap(int x, int y) const;
     
-    moveStatus canMoveTo(int x, int y);
-    
-    void setRadiusVisible(double x, double y, double rad);
-    
-    //If there are no protesters within the radius of x&y, does nothing & returns nullptr. If annoyHowMany is one, the function annoys the first protester in the list of protesters by pointsToAnnoy points and returns a pointer to that protester. If annoyHowMany is all, the function annoys all the protesters and returns a pointer to the last protester in the array
-    Protester* annoyProtestersNear(oneOrAll annoyHowMany, int pointsToAnnoy, double x, double y, double rad = 3.0);
-    
-    bool faceFrackMan(Actor* setFacing);
-    
-    void xAndYtoLeave(int& x, int& y);
     
 private:
     void setDisplayText();
+    
+    inline void addFrontChar(char c, std::string& s, int desLength) const;
     
     void addActors();
     
@@ -64,28 +78,46 @@ private:
     
     void addGoodie();
     
-    inline void addFrontChar(char c, std::string& s, int desLength) const;
+    bool isBoulderBlocking(int x, int y);
     
     void canAddHere(int& x, int& y, bool isBoulder);
     
+    bool isEmptyLoc(int x, int y);
+    
+    bool leavingProtesterCanGoTo(int x, int y, bool movingToExit, int currMinSteps);
+    
     bool distanceGreaterThan6(int x, int y);
     
-    bool isBoulderBlocking(int x, int y);
+    void fillDistFrom(distanceFromWhere from);
+    
+    int getStepsFrom(bool exit, int x, int y);
+    
+    bool areProtestersLeaving();
     
     FrackMan* m_player;
     
     Dirt* m_dirtArr[VIEW_WIDTH][VIEW_HEIGHT];
     
-    struct distFromExit{
-        int distance;
+    struct distFrom{
+        distFrom(int fromPlayer, int fromExit, bool marked)
+        :fromPlayer(fromPlayer), fromExit(fromExit), beenMarked(marked) {}
+        int fromPlayer, fromExit;
         bool beenMarked;
     };
     
-    distFromExit* howFarFromExit[VIEW_WIDTH-4][VIEW_HEIGHT-4];
+    struct distAndLoc{
+        distAndLoc(int x, int y, int dist)
+        :m_x(x), m_y(y), m_dist(dist) {}
+        int m_x, m_y, m_dist;
+    };
+    
+    distFrom* howFarFrom[VIEW_WIDTH-3][VIEW_HEIGHT-3];
     
     std::list<Actor*> m_actors;
     
-    int m_nBarrels, m_nProtesters, m_nTicksSinceLastProtest;
+    int m_nBarrels, m_nProtesters, m_nTicksSinceLastProtest, m_maxProtesters;
+    
+    bool m_shouldUpdateDistExit, m_shouldUpdateDistPlayer;
 };
 
 //Does not access any member variables, so should not be a member function - in this header so it can be accessed by Actor.cpp

@@ -4,6 +4,7 @@
 #include <cmath>
 #include <algorithm>
 #include <random>
+#include <queue>
 using namespace std;
 
 GameWorld* createStudentWorld(string assetDir)
@@ -21,6 +22,12 @@ StudentWorld::~StudentWorld(){
         temp--;
         p = temp;
     }
+    for(int i = 0; i < 61; i++)
+        for(int j = 0; j < 61; j++){
+            delete howFarFrom[i][j];
+            howFarFrom[i][j] = nullptr;
+        }
+    
 }
 
 int StudentWorld::init()
@@ -34,10 +41,11 @@ int StudentWorld::init()
                 m_dirtArr[i][j] = new Dirt(i, j);
         }
     }
-    
     m_nBarrels = 0;
     m_nProtesters = 0;
-    m_nTicksSinceLastProtest = 0;
+    m_nTicksSinceLastProtest = 500;
+    int p = 2 + (getLevel() * 1.5);
+    m_maxProtesters = min(15, p);
     //Initialization of Game Objects
     int boulders = (getLevel() / 2) + 2;
     int gold = 5 - (getLevel() / 2);
@@ -58,6 +66,10 @@ int StudentWorld::init()
         canAddHere(randX, randY, false);
         m_actors.push_back(new Barrel(randX, randY, this));
     }
+    fillDistFrom(topright);
+    fillDistFrom(player);
+    m_shouldUpdateDistExit = false;
+    m_shouldUpdateDistPlayer = false;
     return GWSTATUS_CONTINUE_GAME;
 }
 
@@ -66,13 +78,15 @@ int StudentWorld::move()
 		  // This code is here merely to allow the game to build, run, and terminate after you hit enter a few times.
 		  // Notice that the return value GWSTATUS_PLAYER_DIED will cause our framework to end the current level.
     setDisplayText();
-    string t = "false";
-    for(list<Actor*>::iterator p = m_actors.begin(); p != m_actors.end(); p++){
-        Actor* pointer = *p;
-        if(pointer->getType() == protester && faceFrackMan(pointer))
-            t = "true";
+    if(m_shouldUpdateDistExit && areProtestersLeaving()){
+        fillDistFrom(topright);
+        m_shouldUpdateDistExit = false;
     }
-    cout<<t;
+    if(m_shouldUpdateDistPlayer){
+        fillDistFrom(player);
+        m_shouldUpdateDistPlayer = false;
+    }
+    
     for(list<Actor*>::iterator p = m_actors.begin(); p != m_actors.end(); p++){
         (*p)->doSomething();
         if(!m_player->isAlive())
@@ -87,6 +101,8 @@ int StudentWorld::move()
         if(!(*p)->isAlive()){
             delete *p;
             list<Actor*>::iterator temp = m_actors.erase(p);
+            if((*p)->getType() == protester)
+                m_nProtesters--;
             temp--;
             p = temp;
         }
@@ -119,6 +135,12 @@ void StudentWorld::cleanUp()
         temp--;
         p = temp;
     }
+    
+    for(int i = 0; i < 61; i++)
+        for(int j = 0; j < 61; j++){
+            delete howFarFrom[i][j];
+            howFarFrom[i][j] = nullptr;
+        }
     m_nBarrels = 0;
     m_nProtesters = 0;
 }
@@ -131,11 +153,62 @@ bool StudentWorld::eraseDirt(int startX, int startY, int endX, int endY){
             if(m_dirtArr[i][j] != nullptr){
                 delete m_dirtArr[i][j];
                 m_dirtArr[i][j] = nullptr;
+                m_shouldUpdateDistExit = true;
+                m_shouldUpdateDistPlayer = true;
                 returnValue = true;
             }
         }
     }
     return returnValue;
+}
+
+bool StudentWorld::isDirtOverlap(int x, int y) const{
+    for(int i = 0; i<4; i++){
+        for(int j = 0; j<4; j++){
+            if(x+i < 64 && y+j < 64 && m_dirtArr[x+i][y+j] != nullptr)
+                return true;
+        }
+    }
+    return false;
+}
+
+moveStatus StudentWorld::canMoveTo(int x, int y){
+    if(x > VIEW_WIDTH - 4 || y > VIEW_HEIGHT - 4 || x < 0 || y < 0)
+        return edgeBlocked;
+    if(isBoulderBlocking(x, y))
+        return boulderBlocked;
+    return canMove;
+}
+
+void StudentWorld::setRadiusVisible(double x, double y, double rad){
+    for(list<Actor*>::iterator p = m_actors.begin(); p != m_actors.end(); p++)
+    {
+        if((*p)->distance(x, y) <= rad)
+            (*p)->setVisible(true);
+    }
+}
+
+bool StudentWorld::annoyProtestersNear(Actor* annoyer, int pointsToAnnoy, double x, double y, double rad){
+    bool toReturn = false;
+    for(list<Actor*>::iterator p = m_actors.begin(); p != m_actors.end(); p++){
+        if((*p)->getType() == protester){
+            //mark toReturn as a protester
+            Protester* prot = static_cast<Protester*>(*p);
+            if(prot->canBeAnnoyed() && prot->distance(x, y) <= rad){
+                prot->getAnnoyed(pointsToAnnoy, annoyer->getType());
+                toReturn = true;
+            }
+        }
+    }
+    return toReturn;
+}
+
+Protester* StudentWorld::findProtesterNear(double x, double y){
+    for(list<Actor*>::iterator p = m_actors.begin(); p != m_actors.end(); p++){
+        if((*p)->getType() == protester && (*p)->distance(x, y) <= 3.0)
+            return static_cast<Protester*>(*p);
+    }
+    return nullptr;
 }
 
 void StudentWorld::setDisplayText(){
@@ -166,15 +239,13 @@ inline void StudentWorld::addFrontChar(char c, string& s, int desLength) const{
 
 void StudentWorld::addActors(){
     //Code for checking whether or not to add Protester
-    bool canAddProtest = false;
+    m_nTicksSinceLastProtest++;
     int t = 200 - getLevel();
     int minTicks = max(25, t);
-    if(m_nTicksSinceLastProtest >= minTicks)
-        canAddProtest = true;
-    int p = 2 + (getLevel() * 1.5);
-    int maxProtesters = min(15, p);
-    if(m_nProtesters < maxProtesters && canAddProtest)
-        addProtester();
+    if(m_nTicksSinceLastProtest >= minTicks){
+        if(m_nProtesters < m_maxProtesters)
+            addProtester();
+    }
     //code for checking whether or not to add the goodie
     int goodieRand = getLevel()*25 + 300;
     int goodieNum = randInt(0, goodieRand);
@@ -185,10 +256,11 @@ void StudentWorld::addActors(){
 
 void StudentWorld::addProtester(){
     m_nTicksSinceLastProtest = 0;
+    m_nProtesters++;
     int t = (getLevel() * 10) + 30;
-    int protestRand = min(90, t);
-    int protestNum = randInt(0, protestRand);
-    if(protestNum < protestRand)
+    int protestNum = min(90, t);
+    int protestRand = randInt(0, 100);
+    if(protestRand < protestNum)
         m_actors.push_back(new HardCoreProtester(60, 60, this));
     else
         m_actors.push_back(new Protester(60, 60, this));
@@ -208,23 +280,6 @@ void StudentWorld::addGoodie(){
         m_actors.push_back(new SonarKit(0, 60, this));
 }
 
-bool StudentWorld::isDirtOverlap(int x, int y) const{
-    for(int i = 0; i<4; i++){
-        for(int j = 0; j<4; j++){
-            if(x+i < 64 && y+j < 64 && m_dirtArr[x+i][y+j] != nullptr)
-                return true;
-        }
-    }
-    return false;
-}
-
-moveStatus StudentWorld::canMoveTo(int x, int y){
-    if(x > VIEW_WIDTH - 4 || y > VIEW_HEIGHT - 4 || x < 0 || y < 0)
-        return edgeBlocked;
-    if(isBoulderBlocking(x, y))
-        return boulderBlocked;
-    return canMove;
-}
 
 bool StudentWorld::isBoulderBlocking(int x, int y){
     for(list<Actor*>::iterator p = m_actors.begin(); p != m_actors.end(); p++){
@@ -257,36 +312,15 @@ bool StudentWorld::distanceGreaterThan6(int x, int y){
     return true;
 }
 
-void StudentWorld::setRadiusVisible(double x, double y, double rad){
-    for(list<Actor*>::iterator p = m_actors.begin(); p != m_actors.end(); p++)
-    {
-        if((*p)->distance(x, y) <= rad)
-            (*p)->setVisible(true);
-    }
-}
-
-Protester* StudentWorld::annoyProtestersNear(oneOrAll annoyHowMany, int pointsToAnnoy, double x, double y, double rad){
-    Protester* toReturn = nullptr;
-    for(list<Actor*>::iterator p = m_actors.begin(); p != m_actors.end(); p++){
-        if((*p)->getType() == protester){
-            //mark toReturn as a protester
-            toReturn = static_cast<Protester*>(*p);
-            if(toReturn->canBeAnnoyed() && toReturn->distance(x, y) <= rad){
-                toReturn->getAnnoyed(pointsToAnnoy);
-                if(pointsToAnnoy == 100)
-                    increaseScore(500);
-                if(annoyHowMany == one)
-                    return toReturn;
-            }
-            else
-                toReturn = nullptr;
-        }
-    }
-    return toReturn;
+int StudentWorld::numStepsFromPlayer(int x, int y){
+    if(howFarFrom[x][y] != nullptr)
+        return howFarFrom[x][y]->fromPlayer;
+    else
+        return 64*64;
 }
 
 bool StudentWorld::faceFrackMan(Actor* setFacing){
-    if(m_player->distance(setFacing) <= 4)
+    if(setFacing->distance(m_player) <= 4)
         return false;
     int xDiff = abs(setFacing->getX() - m_player->getX());
     int yDiff = abs(setFacing->getY() - m_player->getY());
@@ -294,7 +328,7 @@ bool StudentWorld::faceFrackMan(Actor* setFacing){
     int lowerY = (m_player->getY() <= setFacing->getY()? m_player->getY() : setFacing->getY());
     if(xDiff == 0){
         for(int i = 0; i < yDiff; i++){
-            if(isDirtAt(lowerX, lowerY+i) || isBoulderBlocking(lowerX, lowerY+i))
+            if(isDirtOverlap(lowerX, lowerY+i) || isBoulderBlocking(lowerX, lowerY+i))
                 return false;
         }
         
@@ -306,7 +340,7 @@ bool StudentWorld::faceFrackMan(Actor* setFacing){
     }
     else if(yDiff == 0){
         for(int i = 0; i < xDiff; i++){
-            if(isDirtAt(lowerX+i, lowerY) || isBoulderBlocking(lowerX+i, lowerY))
+            if(isDirtOverlap(lowerX+i, lowerY) || isBoulderBlocking(lowerX+i, lowerY))
                 return false;
         }
         
@@ -319,10 +353,144 @@ bool StudentWorld::faceFrackMan(Actor* setFacing){
     return false;
 }
 
-void StudentWorld::xAndYtoLeave(int& x, int& y){
-    
+void StudentWorld::moveCloserTo(bool movingToExit, Actor* looking){
+    int minSteps = 64*64;
+    int x = looking->getX();
+    int y = looking->getY();
+    GraphObject::Direction directionToGo = looking->getDirection();
+    if(leavingProtesterCanGoTo(x, y+1, movingToExit, minSteps)){
+        directionToGo = GraphObject::up;
+        minSteps = getStepsFrom(movingToExit, x, y+1);
+    }
+    if(leavingProtesterCanGoTo(x+1, y, movingToExit, minSteps)){
+        directionToGo = GraphObject::right;
+        minSteps = getStepsFrom(movingToExit, x+1, y);
+    }
+    if(leavingProtesterCanGoTo(x, y-1, movingToExit, minSteps)){
+        directionToGo = GraphObject::down;
+        minSteps = getStepsFrom(movingToExit, x, y-1);
+    }
+    if(leavingProtesterCanGoTo(x-1, y, movingToExit, minSteps)){
+        directionToGo = GraphObject::left;
+        minSteps = getStepsFrom(movingToExit, x-1, y);
+    }
+    looking->setDirection(directionToGo);
+    giveNextLocInDir(directionToGo, x, y);
+    looking->moveTo(x, y);
 }
 
+bool StudentWorld::leavingProtesterCanGoTo(int x, int y, bool movingToExit, int currMinSteps){
+    if(howFarFrom[x][y] != nullptr && getStepsFrom(movingToExit, x, y) < currMinSteps && isEmptyLoc(x, y))
+        return true;
+    return false;
+}
+
+void StudentWorld::fillDistFrom(distanceFromWhere from){
+    int currX, currY;
+    bool exitStatus;
+    if(from == topright){
+        exitStatus = true;
+        currX = 60;
+        currY = 60;
+    }
+    else if(from == player){
+        exitStatus = false;
+        currX = m_player->getX();
+        currY = m_player->getY();
+    }
+    int dist = 0;
+    
+    queue<distAndLoc*> locQueue;
+    int countPushes = 0;
+    locQueue.push(new distAndLoc(currX, currY, dist));
+    while(!locQueue.empty()){
+        distAndLoc* current = locQueue.front();
+        currX = current->m_x;
+        currY = current->m_y;
+        dist = current->m_dist;
+        
+        if(howFarFrom[currX][currY] == nullptr){
+            if(from == topright)
+                howFarFrom[currX][currY] = new distFrom(0, dist, true);
+            else if(from == player)
+                howFarFrom[currX][currY] = new distFrom(dist, 0, true);
+        }
+        else{
+            howFarFrom[currX][currY]->beenMarked = true;
+            if(from == topright)
+                howFarFrom[currX][currY]->fromExit = dist;
+            else if(from == player)
+                howFarFrom[currX][currY]->fromPlayer = dist;
+        }
+        delete current;
+        locQueue.pop();
+        
+        if(isEmptyLoc(currX, currY+1) && (howFarFrom[currX][currY + 1] == nullptr || !howFarFrom[currX][currY + 1]->beenMarked)){
+            locQueue.push(new distAndLoc(currX, currY + 1, dist+1));
+            if(howFarFrom[currX][currY + 1] != nullptr)
+                howFarFrom[currX][currY + 1]->beenMarked = true;
+            countPushes++;
+        }
+        if(isEmptyLoc(currX+1, currY) && (howFarFrom[currX + 1][currY] == nullptr || !howFarFrom[currX+1][currY]->beenMarked)){
+            locQueue.push(new distAndLoc(currX + 1, currY, dist+1));
+            if(howFarFrom[currX + 1][currY] != nullptr)
+                howFarFrom[currX + 1][currY]->beenMarked = true;
+            countPushes++;
+        }
+        
+        if(isEmptyLoc(currX, currY-1) && (howFarFrom[currX][currY - 1] == nullptr || !howFarFrom[currX][currY - 1]->beenMarked)){
+            locQueue.push(new distAndLoc(currX, currY - 1, dist+1));
+            if(howFarFrom[currX][currY - 1] != nullptr)
+                howFarFrom[currX][currY - 1]->beenMarked = true;
+            countPushes++;
+        }
+        
+        if(isEmptyLoc(currX-1, currY)&& (howFarFrom[currX - 1][currY] == nullptr || !howFarFrom[currX-1][currY]->beenMarked)){
+            locQueue.push(new distAndLoc(currX - 1, currY, dist+1));
+            if(howFarFrom[currX - 1][currY] != nullptr)
+                howFarFrom[currX - 1][currY]->beenMarked = true;
+            countPushes++;
+        }
+        
+    }
+    if(from == topright)
+       cout<<"Exit pushes: "<<countPushes<<endl;
+    else if(from == player)
+        cout<<"Player pushes: "<<countPushes<<endl;
+    for(int i = 0; i < 61; i++){
+        for(int j = 0; j < 61; j++){
+            if(howFarFrom[i][j] != nullptr)
+                howFarFrom[i][j]->beenMarked = false;
+        }
+    }
+}
+
+bool StudentWorld::isEmptyLoc(int x, int y){
+    if(!isDirtOverlap(x, y) && canMoveTo(x, y) == canMove)
+        return true;
+    return false;
+}
+
+int StudentWorld::getStepsFrom(bool exitStatus, int x, int y){
+    if(howFarFrom[x][y] == nullptr)
+        return 65*65;
+    if(exitStatus)
+        return howFarFrom[x][y]->fromExit;
+    return howFarFrom[x][y]->fromPlayer;
+}
+
+bool StudentWorld::areProtestersLeaving(){
+    for(list<Actor*>::iterator p = m_actors.begin(); p != m_actors.end(); p++){
+        if((*p)->getType() == protester){
+            Protester* prot = static_cast<Protester*>(*p);
+            if(!prot->canBeAnnoyed())
+                return true;
+        }
+    }
+    return false;
+}
+
+////////////////////////////////////////////////////////////////
 int randInt(int min, int max){
     if (max < min)
         swap(max, min);

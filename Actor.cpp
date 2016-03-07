@@ -5,6 +5,27 @@
 #include <queue>
 // Students:  Add code to this file (if you wish), Actor.h, StudentWorld.h, and StudentWorld.cpp
 using namespace std;
+
+void giveNextLocInDir(GraphObject::Direction d, int& x, int& y){
+    switch(d){
+        case GraphObject::up:
+            y++;
+            break;
+        case GraphObject::right:
+            x++;
+            break;
+        case GraphObject::down:
+            y--;
+            break;
+        case GraphObject::left:
+            x--;
+            break;
+        case GraphObject::none:
+            break;
+    }
+}
+
+/////////////////////////////////////////////////////////////////////////
 Actor::Actor(int imageID, int startX, int startY, Direction dir, StudentWorld* currWorld, double size, unsigned int depth)
 :GraphObject(imageID, startX, startY, dir, size, depth)
 {
@@ -15,7 +36,16 @@ Actor::Actor(int imageID, int startX, int startY, Direction dir, StudentWorld* c
         m_type = boulder;
     else if(imageID == IID_HARD_CORE_PROTESTER || imageID == IID_PROTESTER)
         m_type = protester;
+    else if(imageID == IID_WATER_SPURT)
+        m_type = squirt;
     else m_type = other;
+}
+
+void Actor::doSomething(){
+    if(!isAlive())
+        return;
+    uniqueDoSomething();
+    return;
 }
 
 double Actor::distance(Actor* check) const{
@@ -27,31 +57,6 @@ double Actor::distance(int x, int y) const{
     double dxdy = pow(static_cast<double>(getX() - x), 2.0) + pow(static_cast<double>(getY() - y), 2.0);
     return sqrt(dxdy);
 }
-void Actor::doSomething(){
-    if(!isAlive())
-        return;
-    uniqueDoSomething();
-    return;
-}
-
-void Actor::giveNextLocInDir(Direction d, int& x, int& y){
-    switch(d){
-        case up:
-            y++;
-            break;
-        case right:
-            x++;
-            break;
-        case down:
-            y--;
-            break;
-        case left:
-            x--;
-            break;
-        case none:
-            break;
-    }
-}
 
 /////////////////////////////////////////////////////////////////////////
 Person::Person(int imageID, int startX, int startY,  Direction dir, StudentWorld* currWorld, int hitPoints, int giveUpSound, double size, unsigned int depth)
@@ -60,19 +65,16 @@ Person::Person(int imageID, int startX, int startY,  Direction dir, StudentWorld
     m_giveUpSound = giveUpSound;
 }
 
-void Person::getAnnoyed(int toSub){
+void Person::getAnnoyed(int toSub, actorType annoyer){
     m_hitPoints -= toSub;
     if(m_hitPoints <= 0){
-        hpRanOut();
+        hpRanOut(annoyer);
         getWorld()->playSound(m_giveUpSound);
     }
     else
         wasAnnoyed();
 }
 
-void Person::wasAnnoyed(){
-    return;
-}
 
 /////////////////////////////////////////////////////////////////////////
 Goodie::Goodie(int imageID, int startX, int startY, StudentWorld* currWorld, bool visibility, int permanence, int pointValue, int soundID, int forWho)
@@ -163,21 +165,23 @@ void FrackMan::uniqueDoSomething(){
             int y = currY;
             giveNextLocInDir(d, x, y);
             moveStatus m = getWorld()->canMoveTo(x, y); //initialize this variable in all cases so that we do not have to call canMoveTo more than once, as that would be expensive
-            if(m == canMove)
+            if(m == canMove){
                 moveTo(x, y);
+                getWorld()->makeUpdateDistFromPlayer();
+            }
             else if (m == edgeBlocked)
                 moveTo(currX, currY);
         }
         else if(move == 'z' || move == 'Z'){
             if(m_sonar > 0){
+                getWorld()->playSound(SOUND_SONAR);
                 getWorld()->setRadiusVisible(getX(), getY(), 12.00);
                 m_sonar--;
             }
         }
         //
-        else if(KEY_PRESS_TAB){
+        else if(move == KEY_PRESS_TAB){
             if(m_nuggets > 0){
-                //int startX, int startY, StudentWorld* currWorld, bool visibility, int permanence, int forWho
                 getWorld()->addToWorld(new Nugget(getX(), getY(), getWorld(), true, GOODIE_TEMP, PTESTOR_GOODIE));
                 m_nuggets--;
             }
@@ -215,10 +219,6 @@ Actor* FrackMan::createSquirt(){
     return nullptr;
 }
 
-void FrackMan::hpRanOut(){
-    setDead();
-}
-
 /////////////////////////////////////////////////////////////////////////
 Boulder::Boulder(int startX, int startY, StudentWorld* currWorld)
 :Actor(IID_BOULDER, startX, startY, down, currWorld, 1, 1){
@@ -250,7 +250,9 @@ void Boulder::uniqueDoSomething(){
             setDead();
         if(distance(getWorld()->getPlayer()) <= 3.00)
             getWorld()->getPlayer()->getAnnoyed(100);
-        getWorld()->annoyProtestersNear(all, 100, getX(), getY(), 3.00);
+        getWorld()->annoyProtestersNear(this, 100, getX(), getY(), 3.00);
+        getWorld()->makeUpdateDistFromPlayer();
+        getWorld()->makeUpdateDistFromExit();
     }
     return;
 }
@@ -273,7 +275,7 @@ Squirt::Squirt(int startX, int startY, Direction dir, StudentWorld* currWorld)
 }
 
 void Squirt::uniqueDoSomething(){
-    if(getWorld()->annoyProtestersNear(all, 2, getX(), getY(), 3.00) != nullptr){
+    if(getWorld()->annoyProtestersNear(this, 2, getX(), getY(), 3.00)){
         setDead();
         return;
     }
@@ -287,7 +289,7 @@ void Squirt::uniqueDoSomething(){
         int xCheck= getX();
         int yCheck = getY();
         giveNextLocInDir(d, xCheck, yCheck);
-        if(getWorld()->canMoveTo(xCheck, yCheck) && !getWorld()->isDirtOverlap(xCheck, yCheck))
+        if(getWorld()->canMoveTo(xCheck, yCheck) == canMove && !getWorld()->isDirtOverlap(xCheck, yCheck))
             moveTo(xCheck, yCheck);
         else setDead();
     }
@@ -318,9 +320,8 @@ void Nugget::getFound(){
 
 void Nugget::goodieDoSomething(){
     if(forWhom() == PTESTOR_GOODIE){
-        //Allows us to find a Protester in the radius of the nugget without actually annoying it, as the points to annoy is 0 i.e. there will be no effect on the Protester.
-        Protester* prot = nullptr;
-        prot = getWorld()->annoyProtestersNear(one, 0, getX(), getY(), 3.0);
+        //Allows us to find a Protester
+        Protester* prot = getWorld()->findProtesterNear(getX(), getY());
         if(prot != nullptr){
             setDead();
             getWorld()->playSound(SOUND_PROTESTER_FOUND_GOLD);
@@ -350,7 +351,7 @@ void WaterPool::getFound(){
 
 /////////////////////////////////////////////////////////////////////////
 
-Protester::Protester(int startX, int startY, StudentWorld* currWorld, int hitPoints, int imageID)
+Protester::Protester(int startX, int startY, StudentWorld* currWorld, int hitPoints, int imageID, bool isHardCore)
 :Person(imageID, startX, startY, left, currWorld, hitPoints, SOUND_PROTESTER_GIVE_UP){
     m_stepsToKeepGoing = randInt(8, 60);
     m_leaveScreenState = false;
@@ -358,29 +359,35 @@ Protester::Protester(int startX, int startY, StudentWorld* currWorld, int hitPoi
     m_ticksToRest = max(0, restTicks);
     m_ticksRested = 0;
     m_ticksSinceYell = 15;
+    m_ticksSincePerp = 200;
+    m_isHardCore = isHardCore;
 }
 
 void Protester::uniqueDoSomething(){
-    if(m_ticksToRest >= m_ticksRested){
+    //Step 1:
+    if(m_ticksToRest > m_ticksRested){
         m_ticksRested++;
         return;
     }
     
+    //Initialize important variables
     m_ticksRested = 0;
     m_ticksSinceYell++;
+    m_ticksSincePerp++;
+    
     int currX = getX();
     int currY = getY();
+    
+    //Step 2:
     if(m_leaveScreenState){
-        if(getX() == 60 && getY() == 60){
+        if(getX() == 60 && getY() == 60)
             setDead();
-        }
-        else{
-            getWorld()->xAndYtoLeave(currX, currY);//Create a 2-D array/vector of DISTANCES away at each point.
-            moveTo(currX, currY);
-        }
+        else
+            getWorld()->moveCloserTo(true, this);//Create a 2-D array/vector of DISTANCES away at each point.
         return;
     }
     
+    //Step 4:
     if(canShoutAtFrackMan() && m_ticksSinceYell > 15){
         getWorld()->playSound(SOUND_PROTESTER_YELL);
         getWorld()->getPlayer()->getAnnoyed(2);
@@ -388,7 +395,13 @@ void Protester::uniqueDoSomething(){
         return;
     }
     
-    if(getWorld()->faceFrackMan(this)){
+    //Step 5 for a hardCore Protester:
+    //We only want to return if hardCoreDoSomething tells us to, which it never will for a regular protestor
+    if(hardCoreDoSomething())
+        return;
+    
+    //Step 5 (6 for HCP):
+    else if(getWorld()->faceFrackMan(this)){
         Direction d = getDirection();
         giveNextLocInDir(d, currX, currY);
         moveTo(currX, currY);
@@ -396,7 +409,46 @@ void Protester::uniqueDoSomething(){
         return;
     }
     
-    hardCoreDoSomething();
+    //Step 6 (7 for HCP):
+    m_stepsToKeepGoing--;
+    int nextX = currX;
+    int nextY = currY;
+    Direction d;
+    if(m_stepsToKeepGoing <= 0){
+        do{
+            nextX = currX;
+            nextY = currY;
+            int i = randInt(0, 3);
+            switch(i){
+                case 0: d = up; break;
+                case 1: d = right; break;
+                case 2: d = down; break;
+                case 3: d = left; break;
+                default: d = right; break;
+            }
+            giveNextLocInDir(d, nextX, nextY);
+        }while(getWorld()->isDirtOverlap(nextX, nextY) || getWorld()->canMoveTo(nextX, nextY) != canMove);
+        setDirection(d);
+        m_stepsToKeepGoing = randInt(8, 60);
+    }
+    
+    //Step 7 (8 for HCP):
+    else if(m_ticksSincePerp >= 200 && canMovePerpInD(d)){
+        setDirection(d);
+        m_stepsToKeepGoing = randInt(8, 60);
+        m_ticksSincePerp = 0;
+    }
+    
+    //Step 8/9/10:
+    giveNextLocInDir(getDirection(), nextX, nextY);
+    if(getWorld()->isDirtOverlap(nextX, nextY) || getWorld()->canMoveTo(nextX, nextY) != canMove){
+        m_stepsToKeepGoing = 0;
+        return;
+    }
+    else{
+        moveTo(nextX, nextY);
+        return;
+    }
 }
 
 bool Protester::canShoutAtFrackMan(){
@@ -438,38 +490,81 @@ void Protester::getStunned(){
     int changeTicksRested = m_ticksToRest - ticksToWait;
     m_ticksRested = changeTicksRested;
 }
-void Protester::hardCoreDoSomething(){
-    return;
-}
+
 
 void Protester::findGold(){
     getWorld()->increaseScore(25);
     m_leaveScreenState = true;
 }
 
-void Protester::hpRanOut(){
+void Protester::hpRanOut(actorType annoyer){
     m_leaveScreenState = true;
     m_ticksRested = m_ticksToRest + 1;
+    if(annoyer == squirt){
+        if(m_isHardCore)
+            getWorld()->increaseScore(250);
+        else
+            getWorld()->increaseScore(100);
+    }
+    else if(annoyer == boulder)
+        getWorld()->increaseScore(500);
 }
 
 void Protester::wasAnnoyed(){
     getWorld()->playSound(SOUND_PROTESTER_ANNOYED);
     getStunned();
 }
+
+bool Protester::canMovePerpInD(Direction& d){
+    int currX = getX();
+    int currY = getY();
+    if(getDirection() == left || getDirection() == right){
+        bool canMoveUp = !getWorld()->isDirtOverlap(currX, currY+1) && getWorld()->canMoveTo(currX, currY+1) == canMove;
+        bool canMoveDown = !getWorld()->isDirtOverlap(currX, currY-1) && getWorld()->canMoveTo(currX, currY-1) == canMove;
+        if(canMoveUp){
+            if(canMoveDown)
+                d = (randInt(0, 1) ? up : down);
+            else
+                d = up;
+            return true;
+        }
+        else if(canMoveDown){
+            d = down;
+            return true;
+        }
+    }
+    else if(getDirection() == up || getDirection() == down){
+        bool canMoveR = !getWorld()->isDirtOverlap(currX+1, currY) && getWorld()->canMoveTo(currX+1, currY) == canMove;
+        bool canMoveL = !getWorld()->isDirtOverlap(currX-1, currY) && getWorld()->canMoveTo(currX-1, currY) == canMove;
+        if(canMoveR){
+            if(canMoveL)
+                d = (randInt(0, 1) ? left : right);
+            else
+                d = right;
+            return true;
+        }
+        else if(canMoveL){
+            d = left;
+            return true;
+        }
+    }
+    return false;
+}
 /////////////////////////////////////////////////////////////////////////
 HardCoreProtester::HardCoreProtester(int startX, int startY, StudentWorld* currWorld)
-:Protester(startX, startY, currWorld, 20, IID_HARD_CORE_PROTESTER)
-{}
+:Protester(startX, startY, currWorld, 20, IID_HARD_CORE_PROTESTER, false){
+    m_cellPhoneRad = 16 + currWorld->getLevel()/2;
+}
 
-void HardCoreProtester::hardCoreDoSomething(){
-    
+bool HardCoreProtester::hardCoreDoSomething(){
+    if(getWorld()->numStepsFromPlayer(getX(), getY()) < m_cellPhoneRad){
+        getWorld()->moveCloserTo(false, this);
+        return true;
+    }
+    return false;
 }
 
 void HardCoreProtester::findGold(){
     getWorld()->increaseScore(50);
     getStunned();
-}
-
-void HardCoreProtester::hpRanOut(){
-    
 }
