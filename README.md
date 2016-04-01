@@ -1,2 +1,2 @@
 # proj-3
-This repository will house my work for my Project 3 on CS32. I am using GitHub both as a means to ensure my work does not get lost and so that I gain familiarity with using it.
+This repository will house my work for Project 3 of Winter '16 CS32. This project contains the backend for a video game called FrackMan, which is a copy of DigDug. The specification for this project, and additional files required to compile and create the game can be found at http://web.cs.ucla.edu/classes/winter16/cs32/Projects/3/spec.html. I am using GitHub both as a means to ensure my work does not get lost and so that I gain familiarity with using it.
